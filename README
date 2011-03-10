@@ -1,0 +1,17 @@
+SystemSens is a tool developed at the Center For Embedded Networked
+Sensing (CENS) to log detailed system events on Android smartphones.
+SystemSens keeps the logged records in a local database on the phone,
+and regularly uploads them to a CENS server.
+
+Features:
+o Battery information (level, voltage, temperature, health, charging status):
+o Screen status events (on and off)
+o Application usage times
+o Network activity per application
+o WiFi interface status changes (on, off, scanning, connecting, disconnecting)
+o Cellular interface status changes including cell location and signal strength
+o Voice call status changes
+o Start, end, pause and resume times of activities and services
+o Aggregate CPU usage information
+o Aggerage memory usage information
+o Network traffic statistics per interface
