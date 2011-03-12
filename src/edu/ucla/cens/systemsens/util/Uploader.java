@@ -95,7 +95,7 @@ public class Uploader
 
     /** Upload location of the SystemSens server */
     private static final String CUSTOM_URL 
-        = "https://systemsens.cens.ucla.edu/service/viz/put/";
+        = "REPLACE_WITH_SERVER_URL";
 
 
     private static final String IMEI = SystemSens.IMEI;
