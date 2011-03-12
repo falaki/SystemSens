@@ -210,8 +210,8 @@ public class EventLogger
                         getIndex(lineInfo[2], "Component Name");
 					appTagInfo.actionIndex = getIndex(lineInfo[2],
                             "Action");
-					appTagInfo.taskIndex = getIndex(lineInfo[2], "Task
-                            ID");
+					appTagInfo.taskIndex = getIndex(lineInfo[2], 
+                            "Task ID");
 					
 					mTags.put(appTagInfo.id, appTagInfo);
 					
