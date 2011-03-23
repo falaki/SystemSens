@@ -50,10 +50,6 @@
             android:label="SystemSens" 
             android:name=".SystemSens"
             android:exported="true">
-            <intent-filter>
-                <action 
-                    android:name="edu.ucla.cens.systemsens.IPowerMonitor" />
-            </intent-filter>
         </service>
 
     </application>

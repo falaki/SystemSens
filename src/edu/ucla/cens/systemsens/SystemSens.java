@@ -1,37 +1,6 @@
-/** 
+/** SystemSens
   *
-  * Copyright (c) 2011, The Regents of the University of California. All
-  * rights reserved.
-  *
-  * Redistribution and use in source and binary forms, with or without
-  * modification, are permitted provided that the following conditions are
-  * met:
-  *
-  *   * Redistributions of source code must retain the above copyright
-  *   * notice, this list of conditions and the following disclaimer.
-  *
-  *   * Redistributions in binary form must reproduce the above copyright
-  *   * notice, this list of conditions and the following disclaimer in
-  *   * the documentation and/or other materials provided with the
-  *   * distribution.
-  *
-  *   * Neither the name of the University of California nor the names of
-  *   * its contributors may be used to endorse or promote products
-  *   * derived from this software without specific prior written
-  *   * permission.
-  *
-  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-  * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT
-  * HOLDER> BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-  * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-  *
+  * Copyright (C) 2010 Center for Embedded Networked Sensing
   */
 
 package edu.ucla.cens.systemsens;
@@ -242,9 +211,6 @@ public class SystemSens extends Service
     /** Flag set when the phone is plugged */
     private static boolean mIsPlugged = false;
 
-    /** Contains the list of registered applications */
-    private RemoteCallbackList<IAdaptiveApplication> mClients;
-
 
     @Override
     public void onStart(Intent intent, int startId)
@@ -277,6 +243,7 @@ public class SystemSens extends Service
                 if (action.equals(POLLSENSORS_ACTION))
                 {
                     pollingSensors();
+
                 }
         }
 
@@ -435,7 +402,6 @@ public class SystemSens extends Service
         //showNotification();
         mVib = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE); 
 
-        mClients = new RemoteCallbackList<IAdaptiveApplication>();
 
 
 
@@ -508,58 +474,14 @@ public class SystemSens extends Service
     }
 
 
-    private final IPowerMonitor.Stub mPowerMonitorBinder =
-        new IPowerMonitor.Stub()
-    {
-
-        /**
-          * Register the application. 
-          *
-          * @param  app     an implementatino of IAdaptiveApplication
-          */
-        public void register(IAdaptiveApplication app, int horizon)
-        {
-            mClients.register(app, new Integer(horizon));
-
-        }
-
-        /**
-          * Unregister the application. 
-          *
-          * @param  app     an implementatino of IAdaptiveApplication
-          */
-        public void unregister(IAdaptiveApplication app)
-        {
-            mClients.unregister(app);
-        }
-
-        /**
-          * Set a battery deadline for the system.
-          * 
-          * @param  deadline    Specified battery deadline in minutes
-          *                     from  now
-          */
-
-        public void setDeadline(int deadline)
-        {
-           Status.setDeadline(deadline);
-           Log.i(TAG, "set deadline to " + deadline);
-        }
-
-
-    };
-
-
     @Override
-    public IBinder onBind(Intent intent) {
-        if (IPowerMonitor.class.getName().equals(intent.getAction()))
-            return mPowerMonitorBinder;
-
-        return null;
+    public IBinder onBind(Intent intent) 
+    {
+         return mLocalBinder;
     }
 
     /** This is the object that receives interactions from clients. */
-    //private final IBinder mLocalBinder = new LocalBinder();
+    private final IBinder mLocalBinder = new LocalBinder();
 
     /**
      * Broadcast receiver for WiFi scan results.
@@ -1270,56 +1192,9 @@ public class SystemSens extends Service
         if (mIsPlugged && (!mIsUploading))
             upload();
 
-        // Getting info from clients
-        List workList;
-        JSONObject clientInfo;
-        int clientCount =  mClients.beginBroadcast();
-        Log.i(TAG, "Observing " + clientCount + " clients.");
-        String clientName;
-        List<String> unitNames;
-        IAdaptiveApplication app;
-
-        for (int i = 0; i < clientCount; i++)
-        {
-            try
-            {
-                app = mClients.getBroadcastItem(i);
-                workList = app.getWork();
-                clientName = app.getName();
-                unitNames = app.identifyList();
-                clientInfo = new JSONObject();
-
-                try
-                {
-                    for(int j = 0; j < workList.size(); j++)
-                    {
-                        clientInfo.put(unitNames.get(j),
-                                workList.get(j));
-                    }
-                    Log.i(TAG, "From " + clientName + ":" +
-                            clientInfo.toString());
-                    mDbAdaptor.createEntry( clientInfo, clientName);
-
-                }
-                catch (JSONException je)
-                {
-                    Log.e(TAG, "Could not handle JSON object", je);
-                }
-            }
-            catch (RemoteException re)
-            {
-                Log.e(TAG, "Could not get WorkList", re);
-            }
-
-
-        }
-
-        mClients.finishBroadcast();
-
-
 
         Log.i(TAG, "Logging sensors");
-
+        
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.FROYO )
         {
 
