@@ -1,38 +1,9 @@
-/** 
-  *
-  * Copyright (c) 2011, The Regents of the University of California. All
-  * rights reserved.
-  *
-  * Redistribution and use in source and binary forms, with or without
-  * modification, are permitted provided that the following conditions are
-  * met:
-  *
-  *   * Redistributions of source code must retain the above copyright
-  *   * notice, this list of conditions and the following disclaimer.
-  *
-  *   * Redistributions in binary form must reproduce the above copyright
-  *   * notice, this list of conditions and the following disclaimer in
-  *   * the documentation and/or other materials provided with the
-  *   * distribution.
-  *
-  *   * Neither the name of the University of California nor the names of
-  *   * its contributors may be used to endorse or promote products
-  *   * derived from this software without specific prior written
-  *   * permission.
-  *
-  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-  * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT
-  * HOLDER> BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-  * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-  *
-  */
+/**
+ * SystemSens
+ *
+ * Copyright (C) 2009 Hossein Falaki
+ */
+
 package edu.ucla.cens.systemsens.sensors;
 
 import java.io.FileInputStream;
@@ -50,11 +21,14 @@ import android.util.Log;
 import org.json.JSONObject;
 import org.json.JSONException;
 
+import java.util.List;
+import java.util.ArrayList;
+
 /**
  * Reads varios information from the /proc file system. 
  *
  * After an object of this class is constructed, each call to
- * get() methods returns a HashMap containing some information from
+ * get*() methods returns a HashMap containing some information from
  * the /proc of the Linux kernel.
  * 
  * @author Hossein Falaki
@@ -74,7 +48,7 @@ public class Proc
     /** Address of memory information file */
     private static final String MEMINFO_PATH = "/proc/meminfo";
     
-    private long total = 0;
+    private static long sTotal = 0;
     private long idle  = 0;
     private long user = 0;
     private long system = 0;
@@ -102,8 +76,7 @@ public class Proc
         {
 
 			BufferedReader reader = new BufferedReader( new 
-					InputStreamReader( new FileInputStream(
-                            MEMINFO_PATH ) ), 2048 );
+					InputStreamReader( new FileInputStream( MEMINFO_PATH ) ), 2048 );
 
 
             char[] buffer = new char[2024];
@@ -130,6 +103,8 @@ public class Proc
                 }
             }
 
+            reader.close();
+
         }
         catch (Exception e)
         {
@@ -139,6 +114,54 @@ public class Proc
 
 
         return result;    	
+    }
+
+    public static long getCpuTotalTime()
+    {
+        return sTotal;
+    }
+
+
+    public static List<Long> readProcessCpuTime(long processId)
+    {
+
+        List res = null;
+        long utime = 0;
+        long stime = 0;
+
+    	String line;
+    	String[] toks;
+
+		try
+		{
+			BufferedReader reader = new BufferedReader( new 
+					InputStreamReader( new 
+                        FileInputStream(
+                            "/proc/" + processId + "/stat")), 512);
+
+			while ( (line = reader.readLine()) != null )
+			{
+                toks = line.split(" ");
+
+                utime = Long.parseLong(toks[13]);
+                stime = Long.parseLong(toks[14]);
+            }
+
+			reader.close();
+
+            res = new ArrayList<Long>();
+            res.add(utime);
+            res.add(stime);
+
+			
+		}
+		catch( IOException ex )
+		{
+			Log.e(TAG, "Could not read /proc file", ex);
+		}
+	
+        return res;
+
     }
     
     public JSONObject getCpuLoad()
@@ -169,6 +192,8 @@ public class Proc
                 }
             }
 
+            reader.close();
+
         }
         catch (IOException ioe)
         {
@@ -198,17 +223,17 @@ public class Proc
 					currTotal = currUser + currNice + currSystem;
 					currIdle = Long.parseLong(toks[5]);
 		 
-					totalUsage = (currTotal - total) * 100.0f / 
-                        (currTotal - total + currIdle - idle);
+					totalUsage = (currTotal - sTotal) * 100.0f / 
+                        (currTotal - sTotal + currIdle - idle);
 					userUsage = (currUser - user) * 100.0f / 
-                        (currTotal - total + currIdle - idle);
+                        (currTotal - sTotal + currIdle - idle);
 					niceUsage = (currNice - nice) * 100.0f / 
-                        (currTotal - total + currIdle - idle);
+                        (currTotal - sTotal + currIdle - idle);
 					systemUsage = (currSystem - system) * 100.0f / 
-                        (currTotal - total + currIdle - idle);
+                        (currTotal - sTotal + currIdle - idle);
 					
 					
-					total = currTotal;
+					sTotal = currTotal;
 					idle = currIdle;
 					user = currUser;
 					nice = currNice;
@@ -280,7 +305,7 @@ public class Proc
 		}
 		catch( IOException ex )
 		{
-			ex.printStackTrace();			
+			Log.e(TAG, "Could not read /proc file", ex);
 		}
 		
 		return result;
@@ -313,8 +338,7 @@ public class Proc
         {
                        
 			BufferedReader reader = new BufferedReader( new 
-					InputStreamReader( new FileInputStream(
-                            NETDEV_PATH ) ), 2048 );
+					InputStreamReader( new FileInputStream( NETDEV_PATH ) ), 2048 );
 
 
             char[] buffer = new char[2024];
@@ -364,6 +388,7 @@ public class Proc
                 }
 
             }
+            reader.close();
 
         }
         catch (Exception e)

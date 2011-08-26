@@ -1,41 +1,8 @@
-/** 
-  *
-  * Copyright (c) 2011, The Regents of the University of California. All
-  * rights reserved.
-  *
-  * Redistribution and use in source and binary forms, with or without
-  * modification, are permitted provided that the following conditions are
-  * met:
-  *
-  *   * Redistributions of source code must retain the above copyright
-  *   * notice, this list of conditions and the following disclaimer.
-  *
-  *   * Redistributions in binary form must reproduce the above copyright
-  *   * notice, this list of conditions and the following disclaimer in
-  *   * the documentation and/or other materials provided with the
-  *   * distribution.
-  *
-  *   * Neither the name of the University of California nor the names of
-  *   * its contributors may be used to endorse or promote products
-  *   * derived from this software without specific prior written
-  *   * permission.
-  *
-  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-  * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT
-  * HOLDER> BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-  * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-  *
-  */
-
-
-
+/**
+ * SystemSens
+ *
+ * Copyright (C) 2011 Hossein Falaki
+ */
 package edu.ucla.cens.systemsens.util;
 
 
@@ -46,6 +13,9 @@ import java.util.Locale;
 import java.util.Formatter;
 import java.text.SimpleDateFormat;
 import java.text.DecimalFormat;
+
+
+import android.util.Log;
 
 
 
@@ -63,17 +33,29 @@ public class Status
     private static String TAG = "StatusObject";
 
 
-    public static final String LEVEL       = "Battery Level (%)";
-    public static final String TEMP        = "Battery Temperature (C)";
-    public static final String CPU         = "Average CPU usage (%)";
-    public static final String RX          = "Total Received (MB)";
-    public static final String TX          = "Total Sent (MB)";
+    private static long SECOND = 1000;
+    private static long MINUTE = 60 * SECOND;
+    private static long HOUR = 60 * MINUTE;
+
+
+
+    public static final String LEVEL       = "Battery Level";
+    public static final String TEMP        = "Battery Temperature";
+    public static final String CPU         = "Average CPU Usage";
+    public static final String WIFIRX        = "WiFi RX";
+    public static final String WIFITX        = "WiFi TX";
+    public static final String CELLRX        = "Cellular RX";
+    public static final String CELLTX        = "Cellular TX";
+    public static final String EVENTS        = "Screen Events";
+    public static final String SCREEN        = "Screen Time";
 
 
 
     private static ArrayList<String> sKeys;
 
     private static Calendar sDeadline;
+    
+    private static long sScreenOn = Calendar.getInstance().getTimeInMillis();
 
     private static boolean sPlugged = false;
 
@@ -91,8 +73,12 @@ public class Status
         sKeys.add(LEVEL);
         sKeys.add(TEMP);
         sKeys.add(CPU);
-        sKeys.add(TX);
-        sKeys.add(RX);
+        sKeys.add(WIFIRX);
+        sKeys.add(WIFITX);
+        sKeys.add(CELLRX);
+        sKeys.add(CELLTX);
+        sKeys.add(EVENTS);
+        sKeys.add(SCREEN);
 
         sDeadline = null;
 
@@ -124,7 +110,10 @@ public class Status
 
     private static void setTotal(String key, double value)
     {
-        double newTotal = value + get(key);
+        Double current = get(key);
+        if (current.isNaN())
+            current = 0.0;
+        double newTotal = value + current;
         set(key, newTotal);
     }
 
@@ -167,16 +156,16 @@ public class Status
         return get(CPU);
     }
 
-    public static double getRx()
+    public static double getWiFi()
     {
         check();
-        return get(RX);
+        return get(WIFIRX) + get(WIFITX);
     }
 
-    public static double getTx()
+    public static double getCell()
     {
         check();
-        return get(TX);
+        return get(CELLRX) + get(CELLTX);
     }
 
     public static double getDeadline()
@@ -227,25 +216,61 @@ public class Status
         setAvg(CPU, cpu);
     }
 
-    public static void addTraffic(double tx, double rx)
+    public static void screenOn()
     {
         check();
-        setTotal(TX, tx);
-        setTotal(RX, rx);
+        setTotal(EVENTS, 1.0);
+        sScreenOn = Calendar.getInstance().getTimeInMillis();
     }
 
-    public static void setTraffic(double tx, double rx)
+
+    public static void screenOff()
     {
         check();
-        set(TX, tx);
-        set(RX, rx);
+        long current = Calendar.getInstance().getTimeInMillis();
+        setTotal(SCREEN, current - sScreenOn);
     }
-    
-    public static void setDeadline(double minutes)
+
+
+
+    public static void addWiFiTraffic(double tx, double rx)
     {
         check();
-        sDeadline = Calendar.getInstance();
-        sDeadline.add(Calendar.MINUTE, (int)minutes);
+        setTotal(WIFITX, tx);
+        setTotal(WIFIRX, rx);
+    }
+
+    public static void addCellTraffic(double tx, double rx)
+    {
+        check();
+        setTotal(CELLTX, tx);
+        setTotal(CELLRX, rx);
+    }
+
+
+    public static void setWiFiTraffic(double tx, double rx)
+    {
+        check();
+        set(WIFITX, tx);
+        set(WIFIRX, rx);
+    }
+
+    public static void setCellTraffic(double tx, double rx)
+    {
+        check();
+        set(CELLTX, tx);
+        set(CELLRX, rx);
+    }
+
+    
+    public static void setDeadline(Calendar deadline)
+    {
+        double curLevel = getLevel();
+        //check();
+        mSelf = new Status();
+        setLevel(curLevel);
+
+        sDeadline = deadline;
 
 
    }
@@ -284,6 +309,9 @@ public class Status
     {
         check();
         sPlugged = plug;
+        if (plug == true)
+            sDeadline = null;
+
     }
 
 
@@ -305,28 +333,71 @@ public class Status
         SimpleDateFormat sdf = new SimpleDateFormat("EEEEEEEE HH:mm",
                 Locale.US);
 
-        sbRes.append("Battery deadline: ");
-        if (sDeadline != null)
+        sbRes.append("Battery Goal: ");
+        if ((sDeadline != null))
             sbRes.append(sdf.format(sDeadline.getTime()) + "\n");
         else
             sbRes.append("Not set\n");
 
 
-        DecimalFormat df = new DecimalFormat("@@##");
+        DecimalFormat df = new DecimalFormat();
+        df.setMaximumFractionDigits(2);
+
+        DecimalFormat intdf = new DecimalFormat();
+        intdf.setMinimumIntegerDigits(2);
+
+
+        Double level = get(LEVEL);
+        Double cpu = get(CPU);
+        Double wifitx = get(WIFITX);
+        Double wifirx = get(WIFIRX);
+        Double celltx = get(CELLTX);
+        Double cellrx = get(CELLRX);
+        Double events = get(EVENTS);
+        Double screen = get(SCREEN);
 
 
 
-        for (int i=0; i < sKeys.size(); i++)
+        if (!level.isNaN())
+            sbRes.append(LEVEL + ": " + df.format(level) + "%\n");
+
+
+        if (!cpu.isNaN())
+            sbRes.append(CPU + ": " + df.format(cpu) + "%\n");
+
+        if (!events.isNaN())
+            sbRes.append(EVENTS + ": " + intdf.format(events) + "\n");
+
+        if (!screen.isNaN())
         {
-            key = sKeys.get(i);
-            val = get(key);
-            sbRes.append(key + ": ");
 
-            if (val.isNaN())
-                sbRes.append("Not set\n");
-            else 
-                sbRes.append(df.format(val) + "\n");
+            long millis = screen.longValue();
+            long hour = (long) millis/HOUR;
+            long minutes = (long) (millis - hour * HOUR)/MINUTE;
+            long seconds = (long)(millis - minutes*MINUTE - hour*HOUR)/SECOND;
+            sbRes.append(SCREEN + ": " +
+                    intdf.format(hour) + ":" + 
+                    intdf.format(minutes) + ":" +
+                    intdf.format(seconds) + "\n");
         }
+
+
+
+
+        if (!(wifirx.isNaN() || wifitx.isNaN()) && ((wifitx + wifirx)>0))
+            sbRes.append("WiFi (T/R): " 
+                    + df.format(wifitx + wifirx)
+                    + " (" + df.format(wifitx) + "/" 
+                    + df.format(wifirx) + ") MB\n");
+
+        //if (!(celltx.isNaN() || celltx.isNaN()) && ((celltx + cellrx) >0))
+        if (!(celltx.isNaN() || celltx.isNaN()))
+            sbRes.append("Cellular (T/R): " 
+                    +  df.format(celltx + cellrx)
+                    + " (" + df.format(celltx) + "/" 
+                    + df.format(cellrx) + ") MB\n");
+
+
 
         return sbRes.toString();
     }

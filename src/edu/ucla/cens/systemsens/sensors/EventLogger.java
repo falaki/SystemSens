@@ -1,40 +1,3 @@
-/** 
-  *
-  * Copyright (c) 2011, The Regents of the University of California. All
-  * rights reserved.
-  *
-  * Redistribution and use in source and binary forms, with or without
-  * modification, are permitted provided that the following conditions are
-  * met:
-  *
-  *   * Redistributions of source code must retain the above copyright
-  *   * notice, this list of conditions and the following disclaimer.
-  *
-  *   * Redistributions in binary form must reproduce the above copyright
-  *   * notice, this list of conditions and the following disclaimer in
-  *   * the documentation and/or other materials provided with the
-  *   * distribution.
-  *
-  *   * Neither the name of the University of California nor the names of
-  *   * its contributors may be used to endorse or promote products
-  *   * derived from this software without specific prior written
-  *   * permission.
-  *
-  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-  * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT
-  * HOLDER> BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-  * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-  *
-  */
-
-
 package edu.ucla.cens.systemsens.sensors;
 
 import java.io.BufferedReader;
@@ -59,10 +22,12 @@ import android.os.Build;
 /**
  * Reads the logs for which applications have been started, restarted, 
  * resumed, or paused to get an idea for what applications have been used.
- * 
  * There should never exist an instance of this class. Its constructor
  * should be called exactly once to initialize the class. All
  * subsequent calls should be to the static functions.
+ * 
+ * Note: In order for this aspect of the system to work, you must have
+ * included "android.permission.READ_LOGS".
  * 
  * @author Hossein Falaki and John Jenkins
  * @version 1.0
@@ -186,8 +151,7 @@ public class EventLogger
 	{
 		try
 		{
-			BufferedReader reader = new BufferedReader(new
-                    FileReader(theFile));
+			BufferedReader reader = new BufferedReader(new FileReader(theFile));
 			String currLine;
 			ActivityTagInfo appTagInfo;
 			CpuTagInfo cpuTagInfo;
@@ -206,12 +170,9 @@ public class EventLogger
 					appTagInfo = new ActivityTagInfo(currType);
 					
 					appTagInfo.id = Integer.parseInt(lineInfo[0]);
-					appTagInfo.componentNameIndex =
-                        getIndex(lineInfo[2], "Component Name");
-					appTagInfo.actionIndex = getIndex(lineInfo[2],
-                            "Action");
-					appTagInfo.taskIndex = getIndex(lineInfo[2], 
-                            "Task ID");
+					appTagInfo.componentNameIndex = getIndex(lineInfo[2], "Component Name");
+					appTagInfo.actionIndex = getIndex(lineInfo[2], "Action");
+					appTagInfo.taskIndex = getIndex(lineInfo[2], "Task ID");
 					
 					mTags.put(appTagInfo.id, appTagInfo);
 					
@@ -222,13 +183,10 @@ public class EventLogger
 					
 					serviceTagInfo.id = Integer.parseInt(lineInfo[0]);
 					
-					serviceTagInfo.recordIndex = getIndex(lineInfo[2],
-                            "Service Record");
-					serviceTagInfo.nameIndex = getIndex(lineInfo[2],
-                            "Name");
+					serviceTagInfo.recordIndex = getIndex(lineInfo[2], "Service Record");
+					serviceTagInfo.nameIndex = getIndex(lineInfo[2], "Name");
 					serviceTagInfo.pidIndex = getIndex(lineInfo[2], "PID");
-					serviceTagInfo.intentIndex = getIndex(lineInfo[2],
-                            "Intent");
+					serviceTagInfo.intentIndex = getIndex(lineInfo[2], "Intent");
 					
 					mTags.put(serviceTagInfo.id, serviceTagInfo);
 				}
@@ -239,11 +197,9 @@ public class EventLogger
 					cpuTagInfo.id = Integer.parseInt(lineInfo[0]);
 					cpuTagInfo.totalIndex = getIndex(lineInfo[2], "total");
 					cpuTagInfo.userIndex = getIndex(lineInfo[2], "user");
-					cpuTagInfo.iowaitIndex = getIndex(lineInfo[2],
-                            "iowait");
+					cpuTagInfo.iowaitIndex = getIndex(lineInfo[2], "iowait");
 					cpuTagInfo.irqIndex = getIndex(lineInfo[2], "irq");
-					cpuTagInfo.softirqIndex = getIndex(lineInfo[2],
-                            "softirq");
+					cpuTagInfo.softirqIndex = getIndex(lineInfo[2], "softirq");
 					
 					mTags.put(cpuTagInfo.id, cpuTagInfo);
 					
@@ -253,25 +209,16 @@ public class EventLogger
 					memTagInfo = new MemTagInfo(currType);
 					
 					memTagInfo.id = Integer.parseInt(lineInfo[0]);
-					memTagInfo.memFreeIndex = getIndex(lineInfo[2],
-                            "MemFree");
-					memTagInfo.buffersIndex = getIndex(lineInfo[2],
-                            "Buffers");
-					memTagInfo.cachedIndex = getIndex(lineInfo[2],
-                            "Cached");
-					memTagInfo.activeIndex = getIndex(lineInfo[2],
-                            "Active");
-					memTagInfo.inactiveIndex = getIndex(lineInfo[2],
-                            "Inactive");
-					memTagInfo.anonPagesIndex = getIndex(lineInfo[2],
-                            "NaonPages");
-					memTagInfo.mappedIndex = getIndex(lineInfo[2],
-                            "Mapped");
+					memTagInfo.memFreeIndex = getIndex(lineInfo[2], "MemFree");
+					memTagInfo.buffersIndex = getIndex(lineInfo[2], "Buffers");
+					memTagInfo.cachedIndex = getIndex(lineInfo[2], "Cached");
+					memTagInfo.activeIndex = getIndex(lineInfo[2], "Active");
+					memTagInfo.inactiveIndex = getIndex(lineInfo[2], "Inactive");
+					memTagInfo.anonPagesIndex = getIndex(lineInfo[2], "NaonPages");
+					memTagInfo.mappedIndex = getIndex(lineInfo[2], "Mapped");
 					memTagInfo.slabIndex = getIndex(lineInfo[2], "Slab");
-					memTagInfo.sReclaimableIndex =
-                        getIndex(lineInfo[2], "SReclaimable");
-					memTagInfo.sUnreclaimableIndex =
-                        getIndex(lineInfo[2], "SUnreclaimable");
+					memTagInfo.sReclaimableIndex = getIndex(lineInfo[2], "SReclaimable");
+					memTagInfo.sUnreclaimableIndex = getIndex(lineInfo[2], "SUnreclaimable");
 					
 					
 				}
@@ -289,17 +236,20 @@ public class EventLogger
 		}
 	}
 	
-    /** Parses the component descriptor string to find the index among
-     * the list of descriptions that matches "Component Name". This is
-     * the value that is used by Android to describe the Application
-     * and Activity in that Application and is the value we store in
-     * the database to associate who is calling this event.  @param
-     * componentDescriptor A String pulled from the event log tags
-     * file that describes all the types of information that Android
-     * records when an event takes place.
-     * 
-     * @return The index of the "Component Name" in the descriptor.
-     */
+	/**
+	 * Parses the component descriptor string to find the index among the list
+	 * of descriptions that matches "Component Name". This is the value that
+	 * is used by Android to describe the Application and Activity in that 
+	 * Application and is the value we store in the database to associate who
+	 * is calling this event.
+	 * 
+	 * @param componentDescriptor A String pulled from the event log tags file
+	 * 							  that describes all the types of information
+	 * 							  that Android records when an event takes
+	 * 							  place.
+	 * 
+	 * @return The index of the "Component Name" in the descriptor.
+	 */
 	private int getIndex(String componentDescriptor, String component)
 	{
 		String[] params = componentDescriptor.split(",");
@@ -309,16 +259,14 @@ public class EventLogger
 		{
 			try
 			{
-				if(params[currIndex].substring(1, 
-                            compLen + 1).equals(component))
+				if(params[currIndex].substring(1, compLen + 1).equals(component))
 				{
 					return currIndex;
 				}
 			}
 			catch(StringIndexOutOfBoundsException e)
 			{
-				// This is expected as some descriptors aren't as long
-                // as the one we need.
+				// This is expected as some descriptors aren't as long as the one we need.
 			}
 			currIndex++;
 		}
@@ -407,16 +355,13 @@ public class EventLogger
 		
 					
 					if (appTag.componentNameIndex != -1)
-						componentNameStr = (String) ((Object[])
-                                data)[appTag.componentNameIndex];
+						componentNameStr = (String) ((Object[]) data)[appTag.componentNameIndex];
 					
 					if (appTag.actionIndex != -1)
-						actionStr = (String) ((Object[])
-                                data)[appTag.actionIndex];
+						actionStr = (String) ((Object[]) data)[appTag.actionIndex];
 					
 					if (appTag.taskIndex != -1)
-						taskID = (Integer) ((Object[])
-                                data)[appTag.taskIndex];
+						taskID = (Integer) ((Object[]) data)[appTag.taskIndex];
 
 					eventObject = new JSONObject();
 					
@@ -427,28 +372,30 @@ public class EventLogger
 						eventObject.put("Action", actionStr);
 						eventObject.put("Task", taskID);
 						
-						mActivity.put(String.valueOf(eventTime),
-                                eventObject);
+						mActivity.put(String.valueOf(eventTime), eventObject);
 					}
 					catch (JSONException je)
 					{
 						Log.e(TAG, "JSON Exception", je);
 					}
 
+					/*
+					Log.i(TAG, refTag.tagName + " " + eventTime  + " "
+							+ componentNameStr + " "
+							+ actionStr + " "
+							+ taskID);
+					*/
 				} 
 				else if (refTag.type == TagInfo.SERVICE)
 				{
 					
 					serviceTag = (ServiceTagInfo) refTag;
 					
-					serviceName = (String) ((Object[])
-                            data)[serviceTag.nameIndex];
+					serviceName = (String) ((Object[]) data)[serviceTag.nameIndex];
 					if (serviceTag.intentIndex != -1 )
-						serviceIntent = (String) ((Object[])
-                                data)[serviceTag.intentIndex];
+						serviceIntent = (String) ((Object[]) data)[serviceTag.intentIndex];
 					
-					servicePid = (Integer) ((Object[])
-                            data)[serviceTag.pidIndex];
+					servicePid = (Integer) ((Object[]) data)[serviceTag.pidIndex];
 					
 					eventObject = new JSONObject();
 					try
@@ -458,14 +405,19 @@ public class EventLogger
 						eventObject.put("Intent", serviceIntent);
 						eventObject.put("PID", servicePid);
 						
-						mService.put(String.valueOf(eventTime),
-                                eventObject);
+						mService.put(String.valueOf(eventTime), eventObject);
 					}
 					catch (JSONException je)
 					{
 						Log.e(TAG, "JSON Exception", je);
 					}
 
+					/*
+					Log.i(TAG, refTag.tagName + " " + eventTime + " "
+							+ "Service name: " + serviceName + ","
+							+ "Intent: " +  serviceIntent + ", "
+							+ "PID: " + servicePid );
+					*/
 					
 				}
 				else if (refTag.type == TagInfo.CPU)
@@ -476,13 +428,10 @@ public class EventLogger
 					
 					total = (Integer) ((Object[]) data)[cpuTag.totalIndex];
 					user = (Integer) ((Object[]) data)[cpuTag.userIndex];
-					system = (Integer) ((Object[])
-                            data)[cpuTag.systemIndex];
-					iowait = (Integer) ((Object[])
-                            data)[cpuTag.iowaitIndex];
+					system = (Integer) ((Object[]) data)[cpuTag.systemIndex];
+					iowait = (Integer) ((Object[]) data)[cpuTag.iowaitIndex];
 					irq = (Integer) ((Object[]) data)[cpuTag.irqIndex];
-					softirq = (Integer) ((Object[])
-                            data)[cpuTag.softirqIndex];
+					softirq = (Integer) ((Object[]) data)[cpuTag.softirqIndex];
 					
 					eventObject = new JSONObject();
 					try
@@ -494,14 +443,19 @@ public class EventLogger
 						eventObject.put("irq", irq);
 						eventObject.put("softirq", softirq);
 						
-						mService.put(String.valueOf(eventTime),
-                                eventObject);
+						mService.put(String.valueOf(eventTime), eventObject);
 					}
 					catch (JSONException je)
 					{
 						Log.e(TAG, "JSON Exception", je);
 					}
 					
+					/*
+					Log.i(TAG, refTag.tagName + " " + eventTime  + " "
+							+ "Total CPU: " + total + ", "
+							+ "User CPU: " + user + ", "
+							+ "System CPU: " + system);
+					*/
 				}
 				else if (refTag.type == TagInfo.MEMORY)
 				{
@@ -515,16 +469,12 @@ public class EventLogger
 					buffers = (Long) ((Object[]) data)[memTag.buffersIndex];
 					cached = (Long) ((Object[]) data)[memTag.cachedIndex];
 					active = (Long) ((Object[]) data)[memTag.activeIndex];
-					inactive  = (Long) ((Object[])
-                            data)[memTag.inactiveIndex];
-					anonpages = (Long) ((Object[])
-                            data)[memTag.anonPagesIndex];
+					inactive  = (Long) ((Object[]) data)[memTag.inactiveIndex];
+					anonpages = (Long) ((Object[]) data)[memTag.anonPagesIndex];
 					mapped = (Long) ((Object[]) data)[memTag.mappedIndex];
 					slab = (Long) ((Object[]) data)[memTag.slabIndex];
-					sreclaimable = (Long) ((Object[])
-                            data)[memTag.sReclaimableIndex];
-					sunreclaimable = (Long) ((Object[])
-                            data)[memTag.sUnreclaimableIndex];
+					sreclaimable = (Long) ((Object[]) data)[memTag.sReclaimableIndex];
+					sunreclaimable = (Long) ((Object[]) data)[memTag.sUnreclaimableIndex];
 					
 					
 					eventObject = new JSONObject();
@@ -542,14 +492,18 @@ public class EventLogger
 						eventObject.put("sunreclaimable", sunreclaimable);
 						
 						
-						mService.put(String.valueOf(eventTime),
-                                eventObject);
+						mService.put(String.valueOf(eventTime), eventObject);
 					}
 					catch (JSONException je)
 					{
 						Log.e(TAG, "JSON Exception", je);
 					}
 
+					/*
+					Log.i(TAG, refTag.tagName + " " + eventTime  + " "
+							+ "Free Memory: " + memFree + ", "
+							+ "Buffers: " + buffers);
+					*/
 				}
 
 			}
@@ -560,6 +514,7 @@ public class EventLogger
 		if (greatestEventTime != 0)
 		{
 			mLastUpdate = greatestEventTime;
+			//Log.i(TAG, "Updated lastUpdate to " + greatestEventTime);
 		}
 	}
 	

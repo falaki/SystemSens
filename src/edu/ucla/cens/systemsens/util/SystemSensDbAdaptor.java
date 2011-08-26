@@ -1,5 +1,5 @@
 /**
- * SystemSens
+ * SystemSensDbADaptor
  *
  * Copyright (C) 2009 Hossein Falaki
  */
@@ -9,6 +9,8 @@ package edu.ucla.cens.systemsens.util;
 import org.json.JSONObject;
 import org.json.JSONException;
 
+import java.text.SimpleDateFormat;
+import java.util.Locale;
 import java.util.Calendar;
 import java.util.HashSet;
 
@@ -18,8 +20,12 @@ import android.database.Cursor;
 import android.database.SQLException;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
+import android.database.sqlite.SQLiteStatement;
 import android.os.PowerManager;
-import android.util.Log;
+
+
+//import android.util.Log;
+import edu.ucla.cens.systemlog.Log;
 
 import edu.ucla.cens.systemsens.SystemSens;
 
@@ -46,6 +52,8 @@ public class SystemSensDbAdaptor
     private static final String TAG = "SystemSensDbAdapter";
     private DatabaseHelper mDbHelper;
     private SQLiteDatabase mDb;
+
+    private long mDbBirthDate;
     
     /** Database creation sql statement */
     private static final String DATABASE_CREATE =
@@ -53,11 +61,24 @@ public class SystemSensDbAdaptor
            + "autoincrement, recordtime text not null, " 
            + "recordtype text not null, datarecord text not null);";
 
+
+    private static final String DATABASE_DROP = 
+        "DROP TABLE IF EXISTS systemsens";
+    
+    
     private static final String DATABASE_NAME = "data";
     private static final String DATABASE_TABLE = "systemsens";
     private static final int DATABASE_VERSION = 4;
 
+    private static final long ONE_MINUTE = 1000 * 60;
+    private static final long ONE_HOUR = 60 * ONE_MINUTE;
+    private static final long ONE_DAY = 24 * ONE_HOUR;
 
+    private static final long MIN_TICKLE_INTERVAL = ONE_HOUR;
+
+
+
+    private SimpleDateFormat mSDF;
 
     private HashSet<ContentValues> mBuffer;
     private HashSet<ContentValues> tempBuffer;
@@ -66,8 +87,9 @@ public class SystemSensDbAdaptor
     private boolean mFlushLock = false;
 
 
-    private final Context mCtx;
+    //private final Context mCtx;
     private final PowerManager.WakeLock mWL;
+    private final SystemSens mSystemSens;
 
     private static class DatabaseHelper extends SQLiteOpenHelper 
     {
@@ -87,9 +109,11 @@ public class SystemSensDbAdaptor
         public void onUpgrade(SQLiteDatabase db, int oldVersion, 
                 int newVersion) 
         {
-            Log.w(TAG, "Upgrading database from version " + oldVersion + " to "
+            Log.w(TAG, "Upgrading database from version " 
+                    + oldVersion + " to "
                     + newVersion + ", which will destroy all old data");
-            db.execSQL("DROP TABLE IF EXISTS systemsens");
+
+            db.execSQL(DATABASE_DROP);
             onCreate(db);
         }
     }
@@ -98,19 +122,25 @@ public class SystemSensDbAdaptor
      * Constructor - takes the context to allow the database to be
      * opened/created
      * 
-     * @param ctx       the Context within which to work
+     * @param   systesens   SystemSens object
      */
-    public SystemSensDbAdaptor(Context ctx) 
+    public SystemSensDbAdaptor(SystemSens systemsens) 
     {
-        this.mCtx = ctx;
+        //this.mCtx = systemsens;
+        this.mSystemSens = systemsens;
         mBuffer = new HashSet<ContentValues>(); 
 
         PowerManager pm = (PowerManager)
-            ctx.getSystemService(Context.POWER_SERVICE);
+            mSystemSens.getSystemService(Context.POWER_SERVICE);
 
         mWL = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
                 TAG);
         mWL.setReferenceCounted(false);
+
+        mSDF = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
+
+
+        mDbBirthDate = 0L;
 
     }
 
@@ -129,7 +159,7 @@ public class SystemSensDbAdaptor
     {
         if (!mFlushLock)
         {
-            mDbHelper = new DatabaseHelper(mCtx);
+            mDbHelper = new DatabaseHelper(mSystemSens);
             mDb = mDbHelper.getWritableDatabase();
         }
         mOpenLock = true;
@@ -151,6 +181,44 @@ public class SystemSensDbAdaptor
 
 
     /**
+      * Cause the database adaptor to drop the table and clreate it
+      * again. This hack is necessary to prevent the index values from
+      * getting too large. When the DB is created the index starts
+      * from 0.
+      * This method assumes that the database has been opened.
+      */
+    public synchronized void tickle()
+    {
+
+        if (!mOpenLock)
+            return;
+
+
+        long curTime = Calendar.getInstance().getTimeInMillis();
+        
+        if (curTime - mDbBirthDate < MIN_TICKLE_INTERVAL)
+            return;
+
+
+        SQLiteStatement countQuery = mDb.compileStatement(
+                "SELECT COUNT (*) FROM " + DATABASE_TABLE + ";");
+
+        long count = countQuery.simpleQueryForLong();
+
+        if (count == 0)
+        {
+            Log.i(TAG, "Dropping the table.");
+            mDb.execSQL(DATABASE_DROP);
+
+            Log.i(TAG, "Creating a new table.");
+            mDb.execSQL(DATABASE_CREATE);
+
+            mDbBirthDate = curTime;
+        }
+    }
+
+
+    /**
      * Create a new entry using the datarecord provided. 
      * If the entry is successfully created returns the new rowId for
      * that entry, otherwise returns a -1 to indicate failure.
@@ -164,13 +232,8 @@ public class SystemSensDbAdaptor
 
         // First thing, get the current time
         Calendar cal = Calendar.getInstance();
-        String timeStr = "" +
-            cal.get(Calendar.YEAR) + "-" +
-            (cal.get(Calendar.MONTH) + 1) + "-" +
-            cal.get(Calendar.DAY_OF_MONTH) + " " +
-            cal.get(Calendar.HOUR_OF_DAY) + ":" +
-            cal.get(Calendar.MINUTE) + ":" +
-            cal.get(Calendar.SECOND);
+
+        String timeStr = mSDF.format(cal.getTime());
 
 
 
@@ -189,27 +252,27 @@ public class SystemSensDbAdaptor
         }
 
 
+        String recordStr = dataRecord.toString();
 
         ContentValues initialValues = new ContentValues();
         initialValues.put(KEY_TIME, timeStr);
         initialValues.put(KEY_TYPE, type);
-        initialValues.put(KEY_DATARECORD, dataRecord.toString());
+        initialValues.put(KEY_DATARECORD, recordStr );
 
         mBuffer.add(initialValues);
 
-        //Log.i(TAG, "Creating data record" + dataRecord.toString());
+        if (mSystemSens.hasContextReceivers())
+            mSystemSens.broadcast(recordStr);
 
-        //return mDb.insert(DATABASE_TABLE, null, initialValues);
+        //android.util.Log.i(TAG, dataRecord.toString());
+
     }
 
 
-    public void flushDb()
+    public synchronized void flushDb()
     {
-        synchronized(this)
-        {
-            tempBuffer = mBuffer;
-            mBuffer = new HashSet<ContentValues>(); 
-        }
+       tempBuffer = mBuffer;
+       mBuffer = new HashSet<ContentValues>(); 
 
         Thread flushThread = new Thread()
         {
@@ -221,7 +284,7 @@ public class SystemSensDbAdaptor
                 {
                     try
                     {
-                        mDbHelper = new DatabaseHelper(mCtx);
+                        mDbHelper = new DatabaseHelper(mSystemSens);
                         mDb = mDbHelper.getWritableDatabase();
                     }
                     catch (SQLException se)
@@ -236,9 +299,18 @@ public class SystemSensDbAdaptor
                 Log.i(TAG, "Flushing " 
                         + tempBuffer.size() + " records.");
 
-                for (ContentValues value : tempBuffer)
+                try
                 {
-                    mDb.insert(DATABASE_TABLE, null, value);
+                    for (ContentValues value : tempBuffer)
+                    {
+                        mDb.insert(DATABASE_TABLE, null, value);
+                    }
+                }
+                catch (IllegalStateException ilse)
+                {
+                    Log.e(TAG, "Exception inserting. Trying later.",
+                            ilse);
+                    mBuffer = tempBuffer;
                 }
 
 
@@ -279,7 +351,6 @@ public class SystemSensDbAdaptor
      */
     public synchronized boolean deleteRange(long fromId, long toId) 
     {
-
         return mDb.delete(DATABASE_TABLE, KEY_ROWID 
                 + " BETWEEN " 
                 + fromId

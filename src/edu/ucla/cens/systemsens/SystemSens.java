@@ -11,6 +11,9 @@ import java.util.List;
 import java.util.ArrayList;
 
 import android.content.BroadcastReceiver;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager.NameNotFoundException;
+import android.provider.Settings.SettingNotFoundException;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -31,12 +34,13 @@ import android.os.Vibrator;
 import android.os.PowerManager;
 import android.os.RemoteCallbackList;
 import android.os.RemoteException;
-import android.util.Log;
 import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyManager;
 import android.database.SQLException;
 import android.net.wifi.WifiManager;
+import android.net.wifi.WifiManager.WifiLock;
 import android.net.wifi.ScanResult;
+import android.net.Uri;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.view.KeyEvent;
@@ -46,17 +50,30 @@ import android.location.LocationManager;
 import android.location.LocationProvider;
 
 
+
+//import android.util.Log;
+import edu.ucla.cens.systemlog.ISystemLog;
+import edu.ucla.cens.systemlog.Log;
+
+
 import org.json.JSONObject;
 import org.json.JSONException;
 
+import edu.ucla.cens.systemsens.receivers.CalendarContentObserver;
+import edu.ucla.cens.systemsens.receivers.SmsContentObserver;
 import edu.ucla.cens.systemsens.receivers.PhoneStateReceiver;
+import edu.ucla.cens.systemsens.receivers.SmsReceiver;
 import edu.ucla.cens.systemsens.sensors.Proc;
+import edu.ucla.cens.systemsens.sensors.ActivityLogger;
 import edu.ucla.cens.systemsens.sensors.EventLogger;
 import edu.ucla.cens.systemsens.sensors.NetLogger;
+import edu.ucla.cens.systemsens.sensors.CurrentReader;
 import edu.ucla.cens.systemsens.util.SystemSensDbAdaptor;
+import edu.ucla.cens.systemsens.util.PowerDbAdaptor;
 import edu.ucla.cens.systemsens.util.SystemSensWakeLock;
 import edu.ucla.cens.systemsens.util.Uploader;
 import edu.ucla.cens.systemsens.util.Status;
+import edu.ucla.cens.systemsens.util.CircularQueue;
 
 
 
@@ -73,10 +90,20 @@ public class SystemSens extends Service
     private static final String TAG = "SystemSens";
 
     /** Version of the JSON records */
-    public static final String VER = "3.0";
+    public static String VER;
+    
+    public static final String DEFAULT_VER = "3.0";
 
     /** Action string for recording polling sensors */
     public static final String POLLSENSORS_ACTION = "PollSENSORS";
+
+    /** If set 'additional' information will be collected */
+    public static final boolean ADDL_SENSORS = false;
+
+
+    /** If set network location will be logged */
+    public static final boolean NET_LOC = false;
+
 
 
     /** Types of messages used by this service */
@@ -97,7 +124,8 @@ public class SystemSens extends Service
     public static final String MEMSTAT_TYPE = "memory";
     public static final String MEMINFO_TYPE = "meminfo";
     public static final String GPSSTAT_TYPE = "gps";
-    public static final String GPSSTATE_TYPE = "gpsstate";
+    public static final String NETLOCSTATE_TYPE = "netlocstate";
+    public static final String NETLOCATION_TYPE = "netlocation";
     public static final String SENSORSTAT_TYPE = "sensor";
     public static final String BATTERY_TYPE = "battery";
     public static final String SCREEN_TYPE = "screen";
@@ -110,6 +138,8 @@ public class SystemSens extends Service
     public static final String ACTIVITYLOG_TYPE = "activitylog";
     public static final String SERVICELOG_TYPE = "servicelog";
     public static final String WIFISCAN_TYPE = "wifiscan";
+    public static final String APPRESOURCE_TYPE = "appresource";
+    public static final String RECENTAPPS_TYPE = "recentapps";
 
 
     /** String names of JSON data keys */
@@ -118,6 +148,9 @@ public class SystemSens extends Service
 
 
 
+    /** SMS_RECEIVED action string */
+    public static final String SMS_RECEIVED_ACTION =
+                        "android.provider.Telephony.SMS_RECEIVED";
 
 
     /** Intervals used for timers in seconds */
@@ -135,8 +168,8 @@ public class SystemSens extends Service
     private static final long DEFAULT_WIFISCAN_INTERVAL = 2 * ONE_MINUTE;
    
     
-    private static final int MIN_GPS_TIME = 10 * ONE_MINUTE;
-    private static final int MIN_GPS_DIST = 100;
+    private static final int MIN_LOC_TIME = 10 * ONE_MINUTE;
+    private static final int MIN_LOC_DIST = 0;
 
 
 
@@ -146,8 +179,7 @@ public class SystemSens extends Service
 
    
     /** Location manager to get GPS information */
-    /* Consumes too much power */
-    //private LocationManager mLocManager;
+    private LocationManager mLocManager;
 
     /** Power manager object used to acquire a partial wakeLock */
     private PowerManager mPM;
@@ -176,8 +208,11 @@ public class SystemSens extends Service
     //private Dumper mDumper;
 
 
+
+
     /** Database adaptor object */
     private SystemSensDbAdaptor mDbAdaptor;
+    private PowerDbAdaptor  mPowerDB;
 
     /** Holds the IMEI of the device */
     public static String IMEI;
@@ -193,8 +228,18 @@ public class SystemSens extends Service
     /** WifiManager object for scanning */
     private WifiManager mWifi;
 
+    private WifiLock mWifiLock;
+
+    private boolean mIsScanning;
+
     /** Proc parser object */
     private Proc mProc;
+
+    /** Battery current reader */
+    CurrentReader mCurrentReader;
+
+    /** CPU and Memory usage of processes */
+    private ActivityLogger mActivityLogger;
     
     /** EventLogger object */
     private EventLogger mEventLogger;
@@ -204,12 +249,19 @@ public class SystemSens extends Service
     
     /** Receiver objects */
     private PhoneStateReceiver mStateListener;
+    private SmsReceiver mSmsReceiver;
     
-    /** Flag set when WiFi scanning is running */
-    private boolean mIsScanning = false;
-
     /** Flag set when the phone is plugged */
     private static boolean mIsPlugged = false;
+
+    private RemoteCallbackList<IContextReceiver> mContextClients;
+    private int mContextReceiverCount;
+
+    /** String that determines the power adaptation policy */
+    private String mPolicy;
+
+
+
 
 
     @Override
@@ -249,6 +301,7 @@ public class SystemSens extends Service
 
     }
 
+
     
     /**
       * All initializations happen here. 
@@ -258,13 +311,33 @@ public class SystemSens extends Service
     public void onCreate() {
         super.onCreate();
         Log.i(TAG, "onCreate");
-        
-        
+
+
+        Log.setAppName(TAG);
+
+        bindService(new Intent(ISystemLog.class.getName()),
+                Log.SystemLogConnection, Context.BIND_AUTO_CREATE);
+
+
+        // Get version of the application from manifest
+        try
+        {
+            PackageInfo myPackageInfo =
+                getPackageManager().getPackageInfo(getPackageName(), 0);
+            VER = myPackageInfo.versionName;
+            Log.i(TAG, "Got version name: " + VER);
+        }
+        catch (NameNotFoundException nnfe)
+        {
+            Log.e(TAG, "Could not get version name", nnfe);
+            VER = DEFAULT_VER;
+        }
 
 
 
         // Set the default intervals 
         POLLING_INTERVAL = DEFAULT_POLLING_INTERVAL;
+        //POLLING_INTERVAL = 30 * ONE_SECOND;
 
         WIFISCAN_INTERVAL = DEFAULT_WIFISCAN_INTERVAL;
 
@@ -277,18 +350,28 @@ public class SystemSens extends Service
                 Context.CONNECTIVITY_SERVICE);
         mWifi = (WifiManager) getSystemService(Context.WIFI_SERVICE);
 
+        startWifiScan();
+        //setupWiFi();
+
+
         IMEI = mTelManager.getDeviceId(); 
 
         mIsUploading = false;
 
         mDbAdaptor = new SystemSensDbAdaptor(this);
+        mPowerDB = new PowerDbAdaptor(this);
 
         mUploader = new Uploader(mDbAdaptor);
         //mDumper = new Dumper(mDbAdaptor, this);
 
+
+        Log.i(TAG, "About to read PowerDB");
+        mPowerDB.readDeadline();
+
         
 
         mProc = new Proc();
+        mActivityLogger = new ActivityLogger(this);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.FROYO )
         {
@@ -297,21 +380,31 @@ public class SystemSens extends Service
         }
 
 
+        if (ADDL_SENSORS)
+        {
+            // SMS
+            SmsContentObserver smsContentObserver = new 
+                SmsContentObserver(
+                        this.getApplicationContext(), mDbAdaptor); 
+            getContentResolver().registerContentObserver(
+                    Uri.parse("content://mms-sms"), 
+                    true, smsContentObserver); 
 
-        /* Obsolete. Now the databas is not kept open continiously
-        try
-        {
-            mDbAdaptor.open();
+            // Calendar
+            CalendarContentObserver calendarContentObserver = 
+                new CalendarContentObserver(
+                        this.getApplicationContext(), mDbAdaptor); 
+            getContentResolver().registerContentObserver(
+                    Uri.parse("content://com.android.calendar/calendars"), 
+                    true, calendarContentObserver); 
         }
-        catch (SQLException e)
-        {
-            Log.e(TAG, "Exception", e);
-        }
-        */
+
 
         // Register for battery updates
         registerReceiver(mBatteryInfoReceiver, new IntentFilter(
                     Intent.ACTION_BATTERY_CHANGED));
+
+        mCurrentReader = new CurrentReader();
 
 
         // Register for screen updates
@@ -336,7 +429,8 @@ public class SystemSens extends Service
                 TelephonyManager.ACTION_PHONE_STATE_CHANGED);
         registerReceiver(mCallInfoReceiver, callIntentFilter);
         
-        mStateListener = new PhoneStateReceiver(mDbAdaptor, mConManager);
+        mStateListener = new PhoneStateReceiver(mDbAdaptor,
+                mConManager, this);
         mTelManager.listen(mStateListener,
         		PhoneStateListener.LISTEN_CALL_FORWARDING_INDICATOR |
         		PhoneStateListener.LISTEN_CALL_STATE |
@@ -346,22 +440,24 @@ public class SystemSens extends Service
         		PhoneStateListener.LISTEN_MESSAGE_WAITING_INDICATOR |
         		PhoneStateListener.LISTEN_SERVICE_STATE |
         		PhoneStateListener.LISTEN_SIGNAL_STRENGTH);
+
+        // Register for SMS messages
+        mSmsReceiver = new SmsReceiver(mDbAdaptor);
+        IntentFilter smsIntent = new IntentFilter(
+                SMS_RECEIVED_ACTION);
+        registerReceiver(mSmsReceiver, smsIntent);
                 
         
-        /* This feature is too expensive and is not used any more.
-        // Register for location information updates
-        mLocManager = (LocationManager) getSystemService(
-                LOCATION_SERVICE);
-        mLocManager.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER, 
-                MIN_GPS_TIME, MIN_GPS_DIST, 
-                mLocationListener);
-        mLocManager.requestLocationUpdates(
-                LocationManager.NETWORK_PROVIDER, 
-                MIN_GPS_TIME, MIN_GPS_DIST, 
-                mLocationListener);
-        */
-
+        // Register for network location information updates
+        if (NET_LOC)
+        {
+            mLocManager = (LocationManager) getSystemService(
+                    LOCATION_SERVICE);
+            mLocManager.requestLocationUpdates(
+                    LocationManager.NETWORK_PROVIDER, 
+                    MIN_LOC_TIME, MIN_LOC_DIST, 
+                    mLocationListener);
+        }
 
         Intent alarmIntent = new Intent(SystemSens.this, 
                 SystemSensAlarmReceiver.class);
@@ -399,9 +495,11 @@ public class SystemSens extends Service
         mDbAdaptor.createEntry( sysJson, SYSTEMSENS_TYPE);
 
         mNM = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        //showNotification();
+        showNotification();
         mVib = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE); 
 
+        mContextClients = new RemoteCallbackList<IContextReceiver>();
+        mContextReceiverCount = 0;
 
 
 
@@ -428,28 +526,23 @@ public class SystemSens extends Service
 
         mDbAdaptor.createEntry( sysJson, SYSTEMSENS_TYPE);
 
-        // Clear the message handler's pending messages
-        mHandler.removeMessages(EVENTLOG_MSG);
-        mHandler.removeMessages(NETLOG_MSG);
-        mHandler.removeMessages(PROC_MSG);
-
         // Unregister event updates
         unregisterReceiver(mBatteryInfoReceiver);
         
         if (mIsScanning)
-        {
-        	unregisterReceiver(mWifiScanReceiver);
-        	mIsScanning = false;
-        }
+           	unregisterReceiver(mWifiScanReceiver);
+
         unregisterReceiver(mCallInfoReceiver);
         unregisterReceiver(mNetInfoReceiver);
         unregisterReceiver(mScreenInfoReceiver);
+        unregisterReceiver(mSmsReceiver);
         
         // Unregister location updates
-        //mLocManager.removeUpdates(mLocationListener);
+        if (NET_LOC)
+            mLocManager.removeUpdates(mLocationListener);
         
         // Stop further WiFi scanning
-        stopWifiScan();
+        //stopWifiScan();
 
         // Close the database adaptor
         /* Obsolete. DB is not kept open continously
@@ -460,6 +553,8 @@ public class SystemSens extends Service
 
         // Done!
         Log.i(TAG, "Killed");
+
+        unbindService(Log.SystemLogConnection);
     }
 
     /**
@@ -474,14 +569,232 @@ public class SystemSens extends Service
     }
 
 
-    @Override
-    public IBinder onBind(Intent intent) 
+    public void broadcast(String record)
     {
-         return mLocalBinder;
+        int clientCount = mContextClients.beginBroadcast();
+        IContextReceiver client;
+
+        for (int i = 0; i < clientCount; i++)
+        {
+            client = mContextClients.getBroadcastItem(i);
+            try
+            {
+                client.onReceive(record);
+            }
+            catch (RemoteException re)
+            {
+                Log.e(TAG, "Could not get send record to context client", 
+                        re);
+            }
+
+
+        }
+
+        mContextClients.finishBroadcast();
     }
 
+    public boolean hasContextReceivers()
+    {
+        if (mContextReceiverCount > 0 )
+            return true;
+        else
+            return false;
+    }
+
+
+
+    private final IContextMonitor.Stub mContextMonitorBinder =
+        new IContextMonitor.Stub()
+    {
+        public void register(IContextReceiver receiver, String name)
+        {
+
+            String oldName;
+            IContextReceiver oldApp;
+
+            int clientCount = mContextClients.beginBroadcast();
+
+            for (int i = 0; i < clientCount; i++)
+            {
+                oldApp = mContextClients.getBroadcastItem(i);
+                oldName = (String)mContextClients.getBroadcastCookie(i);
+
+                if (name.equals(oldName))
+                {
+                    mContextClients.unregister(oldApp);
+                    mContextReceiverCount--;
+                    Log.i(TAG, "Eliminated a potential duplicate"
+                            + " in context clients");
+                }
+            }
+
+            mContextClients.finishBroadcast();
+
+
+            mContextClients.register(receiver, name);
+            mContextReceiverCount++;
+        }
+
+
+        /**
+          * Unregister the application. 
+          *
+          * @param  app     an implementation of IContextReceiver
+          */
+        public void unregister(IContextReceiver receiver)
+        {
+            mContextClients.unregister(receiver);
+            mContextReceiverCount--;
+        }
+
+
+    };
+
+
+
+
+    private final IPowerMonitor.Stub mPowerMonitorBinder =
+        new IPowerMonitor.Stub()
+    {
+
+        /**
+          * Register the application. 
+          *
+          * @param  app     an implementatino of IApplication
+          * @param horizon  the interval for power budget in
+          *                 milliseconds.
+          */
+        public void register(IApplication app, int horizon)
+        {
+
+            String newName, oldName;
+            IApplication oldApp;
+
+            try
+            {
+                newName = app.getName();
+                Log.i(TAG, "Registering new client: " + newName);
+            }
+            catch (RemoteException re)
+            {
+                Log.e(TAG, "Could not get client name.");
+                return;
+            }
+
+            int clientCount = mClients.beginBroadcast();
+
+
+            for (int i = 0; i < clientCount; i++)
+            {
+                try
+                {
+                    oldApp = mClients.getBroadcastItem(i);
+                    oldName = oldApp.getName();
+
+                    if (newName.equals(oldName))
+                    {
+                        mClients.unregister(oldApp);
+                        Log.i(TAG, "Eliminated a potential duplicate");
+                    }
+
+                }
+                catch (RemoteException re)
+                {
+                    Log.e(TAG, "Could not get old apps name", re);
+                }
+
+
+            }
+
+            mClients.finishBroadcast();
+
+            int queueSize = (int)(horizon/POLLING_INTERVAL);
+
+            try
+            {
+                List<String> unitNames = app.identifyList();
+                List<CircularQueue> workQueue = 
+                    new ArrayList<CircularQueue>();
+                for (int i = 0; i < unitNames.size(); i++)
+                    workQueue.add( new CircularQueue(queueSize));
+
+                mClients.register(app, workQueue);
+
+            }
+            catch (RemoteException re)
+            {
+                Log.e(TAG, "Could not get WorkList", re);
+            }
+        }
+
+        /**
+          * Unregister the application. 
+          *
+          * @param  app     an implementation of IApplication
+          */
+        public void unregister(IApplication app)
+        {
+            String newName;
+
+            try
+            {
+                newName = app.getName();
+                Log.i(TAG, "Unregistering new client: " + newName);
+            }
+            catch (RemoteException re)
+            {
+                Log.e(TAG, "Could not get client name.");
+                return;
+            }
+            mClients.unregister(app);
+
+        }
+
+        /**
+          * Set a battery deadline for the system.
+          * 
+          * @param  deadline    Specified battery deadline in minutes
+          *                     from  now
+          */
+
+        public void setDeadline(int deadline)
+        {
+            //TODO
+        }
+
+
+    };
+
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        if (IPowerMonitor.class.getName().equals(intent.getAction()))
+            return mPowerMonitorBinder;
+        if (IContextMonitor.class.getName().equals(intent.getAction()))
+            return mContextMonitorBinder;
+
+
+        return null;
+    }
+
+
+
+    /** Contains the list of registered applications */
+    private RemoteCallbackList<IApplication> mClients =
+        new RemoteCallbackList<IApplication>()
+    {
+        public void onCallbackDied(IApplication callback)
+        {
+            super.onCallbackDied(callback);
+            Log.i(TAG, "A client died." +
+                    "Client count is " + this.beginBroadcast());
+            this.finishBroadcast();
+        }
+
+    };
+
     /** This is the object that receives interactions from clients. */
-    private final IBinder mLocalBinder = new LocalBinder();
+    //private final IBinder mLocalBinder = new LocalBinder();
 
     /**
      * Broadcast receiver for WiFi scan results.
@@ -606,6 +919,7 @@ public class SystemSens extends Service
                     case WifiManager.WIFI_STATE_DISABLED: 
                         state = "DISABLED"; 
                         stopWifiScan();
+                        //setupWiFi();
                         break;
                     case WifiManager.WIFI_STATE_DISABLING:
                         state = "DISABLING";
@@ -646,6 +960,7 @@ public class SystemSens extends Service
                     WifiManager.SCAN_RESULTS_AVAILABLE_ACTION));
 
 
+
         mWifi.startScan();
         
         mIsScanning = true;
@@ -668,7 +983,47 @@ public class SystemSens extends Service
         }
     }
 
+    private void setupWiFi()
+    {
+        Log.i(TAG, "Setting up WiFi.");
+        if (!mWifi.isWifiEnabled())
+            mWifi.setWifiEnabled(true);
 
+
+        registerReceiver(mWifiScanReceiver, new IntentFilter( 
+                    WifiManager.SCAN_RESULTS_AVAILABLE_ACTION));
+
+
+        mIsScanning = true;
+
+        mWifi.startScan();
+
+
+
+        if (mWifiLock == null)
+        {
+            mWifiLock = mWifi.createWifiLock(
+                    WifiManager.WIFI_MODE_SCAN_ONLY, TAG);
+            mWifiLock.setReferenceCounted(false);
+
+            if(mWifiLock.isHeld())
+                mWifiLock.acquire();
+        }
+        else
+        {
+            if(mWifiLock.isHeld())
+                mWifiLock.acquire();
+        }
+
+
+        mHandler.removeMessages(WIFISCAN_MSG);
+
+        Message wifimsg = mHandler.obtainMessage(WIFISCAN_MSG);
+        long nextTime = SystemClock.uptimeMillis() 
+            + WIFISCAN_INTERVAL;
+        mHandler.sendMessageAtTime(wifimsg, nextTime);
+
+    }
 
     /**
      * Broadcast receiver for screen updates.
@@ -694,20 +1049,27 @@ public class SystemSens extends Service
         {
             String action = intent.getAction();
             String status = "";
+            int brightness = 0;
             if (action.equals(Intent.ACTION_SCREEN_OFF)) 
             { 
                 status = "OFF";
-
-
-                // TODO: Set the polling interval to the
-                // default values
-
+                Status.screenOff();
             }
             else if (action.equals(Intent.ACTION_SCREEN_ON)) 
             { 
                 status = "ON";
+                Status.screenOn();
 
-                // TODO: Set the polling sensor intervals to 30 seconds
+                // Get screen brightness
+                try {
+                    brightness = android.provider.Settings.System.getInt( 
+                            getContentResolver(), 
+                            android.provider.Settings.System.SCREEN_BRIGHTNESS); 
+                } 
+                catch (SettingNotFoundException e) 
+                { 
+                    Log.e(TAG, "Could not get brightness setting", e);
+                }
 
             }
 
@@ -716,13 +1078,14 @@ public class SystemSens extends Service
             try
             {
                 screenJson.put("status", status);
+                screenJson.put("brightness", brightness);
             }
             catch (JSONException e)
             {
                 Log.e(TAG, "Exception", e);
             }
 
-            Log.i(TAG, "Screen " + screenJson.toString());
+            android.util.Log.i(TAG, "Screen " + screenJson.toString());
 
 
             mDbAdaptor.createEntry( screenJson, SCREEN_TYPE);
@@ -760,10 +1123,12 @@ public class SystemSens extends Service
             {
                 batteryJson = new JSONObject();
 
-                // Get battery level
+                // Get battery info
                 int level = intent.getIntExtra("level", 0);
                 int scale = intent.getIntExtra("scale", 100);
                 int temp  = intent.getIntExtra("temperature", 0);
+                int voltage = intent.getIntExtra( "voltage", 0);
+                long current = mCurrentReader.getCurrent();
 
                 try
                 {
@@ -779,10 +1144,9 @@ public class SystemSens extends Service
 
                 if (plugType > 0)
                 {
-
                     mIsPlugged = true;
-                    Status.setPlug(true);
                     Log.i(TAG, "Phone is plugged.");
+
                     Log.i(TAG, "Starting upload.");
                 	upload();
                     //dump();
@@ -793,17 +1157,8 @@ public class SystemSens extends Service
                     // Launch the user interface.
                     if (mIsPlugged)
                     {
-                        //mVib.vibrate(500);
+                        mVib.vibrate(500);
                         mIsPlugged = false;
-                        Status.setPlug(false);
-                        /*
-                        Intent uiActivityIntent = new Intent(
-                                SystemSens.this,
-                                SystemSensActivity.class);
-                        uiActivityIntent.setFlags(
-                                Intent.FLAG_ACTIVITY_NEW_TASK);
-                        SystemSens.this.startActivity(uiActivityIntent);
-                        */
 
                     }
                 }
@@ -835,6 +1190,7 @@ public class SystemSens extends Service
                     statusString = "Discharging";
                     mIsPlugged = false;
                     Status.setPlug(false);
+
                 } 
                 else if (status == 
                         BatteryManager.BATTERY_STATUS_NOT_CHARGING) 
@@ -914,16 +1270,25 @@ public class SystemSens extends Service
                     Log.e(TAG, "Exception", e);
                 }
  
-                // Get battery voltage
                 try
                 {
-                   batteryJson.put("voltage", intent.getIntExtra( 
-                               "voltage", 0));
+                   batteryJson.put("voltage", voltage);
                 }
                 catch (JSONException e)
                 {
                     Log.e(TAG, "Exception", e);
                 }
+
+                try
+                {
+                   batteryJson.put("current", current);
+                }
+                catch (JSONException e)
+                {
+                    Log.e(TAG, "Exception", e);
+                }
+
+
 
 
                 mDbAdaptor.createEntry( batteryJson, BATTERY_TYPE);
@@ -935,11 +1300,32 @@ public class SystemSens extends Service
     
     LocationListener mLocationListener = new LocationListener()
     {
-    	JSONObject gpsStateObject;
+    	JSONObject locationJson;
     	
     	public void onLocationChanged (Location location)
     	{
-    		//
+    		String provider = location.getProvider();
+            double lat, lon, acc;
+
+            lat = location.getLatitude();
+            lon = location.getLongitude();
+            acc = location.getAccuracy();
+
+            locationJson = new JSONObject();
+            try
+            {
+                locationJson.put("provider", provider);
+                locationJson.put("Lat", lat);
+                locationJson.put("Lon", lon);
+                locationJson.put("Accuracy", acc);
+
+            }
+            catch (JSONException je)
+            {
+                Log.e(TAG, "JSON Exception", je);
+            }
+            
+            mDbAdaptor.createEntry(locationJson, NETLOCATION_TYPE);
     	}
     	    	
     	public void onStatusChanged(String provider, int status, Bundle extra)
@@ -961,58 +1347,54 @@ public class SystemSens extends Service
     		for (String key : extra.keySet())
     			extraStr +=  extra.getInt(key);
     		
-    		gpsStateObject = new JSONObject();
+    		locationJson = new JSONObject();
+
     		try
     		{
-    			gpsStateObject.put("provider", provider);
-    			gpsStateObject.put("status", statusStr);
-    			gpsStateObject.put("extra", extraStr);
+    			locationJson.put("provider", provider);
+    			locationJson.put("status", statusStr);
+    			locationJson.put("extra", extraStr);
     		}
     		catch (JSONException je)
     		{
     			Log.e(TAG, "JSON Exception", je);
     		}
 
-            mDbAdaptor.createEntry( gpsStateObject, GPSSTATE_TYPE);
-
-    		
+            mDbAdaptor.createEntry(locationJson, NETLOCSTATE_TYPE);
     	}
 
 		@Override
 		public void onProviderDisabled(String provider) {
 
-    		gpsStateObject = new JSONObject();
+    		locationJson = new JSONObject();
     		try
     		{
-    			gpsStateObject.put("provider", provider);
-    			gpsStateObject.put("event", "disabled");
+    			locationJson.put("provider", provider);
+    			locationJson.put("event", "disabled");
     		}
     		catch (JSONException je)
     		{
     			Log.e(TAG, "JSON Exception", je);
     		}
 
-            mDbAdaptor.createEntry( gpsStateObject, GPSSTATE_TYPE);
-			
+            mDbAdaptor.createEntry( locationJson, NETLOCSTATE_TYPE);
 		}
 
 		@Override
 		public void onProviderEnabled(String provider) {
 			
-    		gpsStateObject = new JSONObject();
+    		locationJson = new JSONObject();
     		try
     		{
-    			gpsStateObject.put("provider", provider);
-    			gpsStateObject.put("event", "enabled");
+    			locationJson.put("provider", provider);
+    			locationJson.put("event", "enabled");
     		}
     		catch (JSONException je)
     		{
     			Log.e(TAG, "JSON Exception", je);
     		}
 
-            mDbAdaptor.createEntry(  gpsStateObject, GPSSTATE_TYPE);
-
-			
+            mDbAdaptor.createEntry(locationJson, NETLOCSTATE_TYPE);
 		}
     };
     
@@ -1023,6 +1405,7 @@ public class SystemSens extends Service
         public void handleMessage(Message msg)
         {
 
+            /*
             if (msg.what == UPLOAD_START_MSG)
             {
                 mIsUploading = true;
@@ -1032,7 +1415,7 @@ public class SystemSens extends Service
             {
                 mIsUploading = false;
             }
-
+            */
             if (msg.what == WIFISCAN_MSG)
             {
                 mWifi.startScan();
@@ -1070,10 +1453,11 @@ public class SystemSens extends Service
      * thread is spawned and tasked with the upload job.
      * 
      */
-    private void upload()
+    private synchronized void upload()
     {
         if (!mIsUploading)
         {
+            mIsUploading = true;
             Thread uploaderThread = new Thread()
             {
                 public void run()
@@ -1081,31 +1465,37 @@ public class SystemSens extends Service
                     mWL.acquire();
                     // Send an immediate message to the main thread
                     // to inform that a worker thread is running.
+                    /*
                     mHandler.sendMessageAtTime( mHandler.obtainMessage(
                                 UPLOAD_START_MSG), 
                             SystemClock.uptimeMillis());
+                    */
 
-                    
                     Log.i(TAG, "Worker thread started upload task");
                     mUploader.tryUpload();
 
                     // Send an immediate message to the main thread to
                     // inform that the worker thread is finished.
+                    /*
                     mHandler.sendMessageAtTime( mHandler.obtainMessage(
                                 UPLOAD_END_MSG), 
                             SystemClock.uptimeMillis());
+                    */
                     mWL.release();
                 }
             };
 
             uploaderThread.start();
 
+            mIsUploading = false;
         }
         else
         {
             Log.i(TAG, "Upload in progress ...");
         }
     }
+
+
 
     /**
      * Spawns a worker thread to "try" to write the contents of the
@@ -1163,7 +1553,6 @@ public class SystemSens extends Service
     }
 
 
-    /*
     private void showNotification()
     {
         CharSequence text = "SystemSens Service";
@@ -1174,14 +1563,13 @@ public class SystemSens extends Service
         notification.flags |= Notification.FLAG_NO_CLEAR;
 
         PendingIntent contentIntent = PendingIntent.getActivity(
-                this, 0, new Intent(this, SystemSensActivity.class), 0);
+                this, 0, new Intent(), 0);
 
         notification.setLatestEventInfo(this, 
                 getText(R.string.app_name), text, contentIntent);
 
         mNM.notify("SystemSens", NOTIFICATION_ID, notification);
     }
-    */
 
 
 
@@ -1189,8 +1577,78 @@ public class SystemSens extends Service
 
     private void pollingSensors()
     {
+
+        if (!Log.isConnected())
+            bindService(new Intent(ISystemLog.class.getName()),
+                    Log.SystemLogConnection, Context.BIND_AUTO_CREATE);
+
+
         if (mIsPlugged && (!mIsUploading))
             upload();
+
+        // Getting info from clients
+        List workList;
+        JSONObject clientInfo;
+        int clientCount =  mClients.beginBroadcast();
+        Log.i(TAG, "Observing " + clientCount + " clients.");
+        String clientName;
+        List<String> unitNames;
+        IApplication app;
+        List<CircularQueue> pastWork;
+        List<Double> nextWorkLimit;
+        double curWorkSum;
+        boolean bootStrap = true;
+        double newRate;
+
+        for (int i = 0; i < clientCount; i++)
+        {
+            try
+            {
+                app = mClients.getBroadcastItem(i);
+                pastWork = (List<CircularQueue>)
+                    mClients.getBroadcastCookie(i);
+
+                workList = app.getWork();
+                clientName = app.getName();
+                unitNames = app.identifyList();
+                clientInfo = new JSONObject();
+                nextWorkLimit = new ArrayList<Double>();
+
+
+                CircularQueue queue;
+
+                try
+                {
+                    for(int j = 0; j < workList.size(); j++)
+                    {
+                        clientInfo.put(unitNames.get(j),
+                                workList.get(j));
+                        queue = (CircularQueue)(pastWork.get(j));
+                        queue.add((Double)workList.get(j));
+
+                    }
+                    android.util.Log.i(TAG, "From " + clientName + ":" +
+                            clientInfo.toString());
+                    mDbAdaptor.createEntry( clientInfo, clientName);
+
+                }
+                catch (JSONException je)
+                {
+                    Log.e(TAG, "Could not handle JSON object", je);
+                }
+
+
+            }
+            catch (RemoteException re)
+            {
+                Log.e(TAG, "Could not get WorkList", re);
+            }
+
+
+        }
+
+        mClients.finishBroadcast();
+
 
 
         Log.i(TAG, "Logging sensors");
@@ -1234,12 +1692,23 @@ public class SystemSens extends Service
                 CPUSTAT_TYPE);
 
 
+        // Must be called after Proc.getCpuLoad()
+        mDbAdaptor.createEntry( mActivityLogger.getMemCpu(), 
+                APPRESOURCE_TYPE);
+
+        mDbAdaptor.createEntry( mActivityLogger.getRecentTasks(), 
+                RECENTAPPS_TYPE);
+
+
+
         mDbAdaptor.flushDb();
+
+
+
+
 
         // Release the wakelock
         SystemSensWakeLock.releaseCpuLock();
-
-
 
     }
 }

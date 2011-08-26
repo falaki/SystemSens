@@ -1,44 +1,11 @@
-/** 
-  *
-  * Copyright (c) 2011, The Regents of the University of California. All
-  * rights reserved.
-  *
-  * Redistribution and use in source and binary forms, with or without
-  * modification, are permitted provided that the following conditions are
-  * met:
-  *
-  *   * Redistributions of source code must retain the above copyright
-  *   * notice, this list of conditions and the following disclaimer.
-  *
-  *   * Redistributions in binary form must reproduce the above copyright
-  *   * notice, this list of conditions and the following disclaimer in
-  *   * the documentation and/or other materials provided with the
-  *   * distribution.
-  *
-  *   * Neither the name of the University of California nor the names of
-  *   * its contributors may be used to endorse or promote products
-  *   * derived from this software without specific prior written
-  *   * permission.
-  *
-  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-  * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT
-  * HOLDER> BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-  * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-  *
-  */
-
-
+/**
+ * SystemSens
+ *
+ * Copyright (C) 2009 Hossein Falaki
+ */
 package edu.ucla.cens.systemsens.util;
 
 import android.database.Cursor;
-import android.util.Log;
 import android.database.SQLException;
 
 import java.lang.ProcessBuilder;
@@ -62,6 +29,9 @@ import java.io.BufferedInputStream;
 import java.io.DataOutputStream;
 import java.io.InputStream;
 
+
+//import android.util.Log;
+import edu.ucla.cens.systemlog.Log;
 
 import edu.ucla.cens.systemsens.SystemSens;
 
@@ -95,7 +65,7 @@ public class Uploader
 
     /** Upload location of the SystemSens server */
     private static final String CUSTOM_URL 
-        = "REPLACE_WITH_SERVER_URL";
+        = "https://systemsens.cens.ucla.edu/service/viz/put/";
 
 
     private static final String IMEI = SystemSens.IMEI;
@@ -120,10 +90,12 @@ public class Uploader
 
     public void tryUpload()
     {
+        //TODO: hold a wifi lock
 
         Log.i(TAG, "tryUpload started");
         Cursor  c = null;
         boolean postResult = false;
+        boolean noError = true;
 
         try
         {
@@ -141,20 +113,21 @@ public class Uploader
                     SystemSensDbAdaptor.KEY_TYPE);
 
 
-            Integer id;
-            int dbSize =  c.getCount();
+            Integer id, pId;
             HashSet<Integer> keySet = new HashSet<Integer>();
             String newRecord, newType, newTime;
             String line;
             ArrayList<String> content;
 
             int failCount = 0;
+            int dbSize =  c.getCount();
+            int readCount = 0;
 
 
 
             c.moveToFirst();
 
-            while ((dbSize > 0) && SystemSens.isPlugged())
+            while ((dbSize > 0) && SystemSens.isPlugged() && noError)
             {
                 
                 Log.i(TAG, "Total DB size is: " + dbSize);
@@ -162,21 +135,30 @@ public class Uploader
                     ? dbSize : MAX_UPLOAD_SIZE;
 
                 content = new ArrayList<String>();
+                pId = -1;
 
                 for (int i = 0; i < maxCount; i++)
                 {
 
                     id = c.getInt(idIndex);
+                    if ((pId != -1) && (id != (pId + 1)))
+                    {
+                        Log.i(TAG, "Cursor jumped.");
+                        noError = false;
+                        break;
+                    }
                     newRecord = c.getString(dataIndex);
 
                     content.add(URLEncoder.encode(newRecord));
                     keySet.add(id);
+                    readCount++;
+                    pId = id;
 
                     c.moveToNext();
                     
                 }
                 
-                dbSize -= maxCount;
+                dbSize -= readCount;
 
 
                 do
@@ -195,19 +177,6 @@ public class Uploader
                         {
                             Log.e(TAG, "Error deleting rows");
                         }
-
-                        /*
-                        // Too inefficient
-                        Log.i(TAG, "keys to delete" + keySet.toString());
-                        for (int delId : keySet)
-                        {
-                            if( !mDbAdaptor.deleteEntry(delId) )
-                            {
-                                Log.e(TAG, "Error deleting row ID =" +
-                                        delId);
-                            }
-                        }
-                        */
 
                     }
                     else
@@ -229,8 +198,11 @@ public class Uploader
                 }
 
             }
-
+            
             c.close();
+            
+            // Tickle the DB
+            mDbAdaptor.tickle();
             mDbAdaptor.close();
             
         }

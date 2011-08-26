@@ -1,57 +1,32 @@
-/** 
-  *
-  * Copyright (c) 2011, The Regents of the University of California. All
-  * rights reserved.
-  *
-  * Redistribution and use in source and binary forms, with or without
-  * modification, are permitted provided that the following conditions are
-  * met:
-  *
-  *   * Redistributions of source code must retain the above copyright
-  *   * notice, this list of conditions and the following disclaimer.
-  *
-  *   * Redistributions in binary form must reproduce the above copyright
-  *   * notice, this list of conditions and the following disclaimer in
-  *   * the documentation and/or other materials provided with the
-  *   * distribution.
-  *
-  *   * Neither the name of the University of California nor the names of
-  *   * its contributors may be used to endorse or promote products
-  *   * derived from this software without specific prior written
-  *   * permission.
-  *
-  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-  * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT
-  * HOLDER> BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-  * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-  *
-  */
-
-
 package edu.ucla.cens.systemsens.receivers;
+
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Locale;
 
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import android.content.BroadcastReceiver;
+import android.content.ContentResolver;
 import android.content.Context;
+import android.database.Cursor;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
+import android.os.HandlerThread;
+import android.provider.BaseColumns;
+import android.provider.CallLog;
 import android.telephony.CellLocation;
 import android.telephony.PhoneStateListener;
 import android.telephony.ServiceState;
 import android.telephony.SignalStrength;
 import android.telephony.TelephonyManager;
+import android.text.format.DateFormat;
 import android.util.Log;
 
 
 import edu.ucla.cens.systemsens.SystemSens;
+import edu.ucla.cens.systemsens.util.HashPrinter;
 import edu.ucla.cens.systemsens.util.SystemSensDbAdaptor;
 
 
@@ -70,15 +45,23 @@ public class PhoneStateReceiver extends PhoneStateListener
 	
 	private ConnectivityManager mConManager;
 	private SystemSensDbAdaptor mDbAdaptor;
-	
+	private Context context;
 	CellLocation mLastCellLoc = null;
-	
-	
-	
-	public PhoneStateReceiver(SystemSensDbAdaptor dbAdaptor, ConnectivityManager conManager)
+	private MessageDigest mDigest;
+	public PhoneStateReceiver(SystemSensDbAdaptor dbAdaptor, 
+            ConnectivityManager conManager, Context context)
 	{
 		mDbAdaptor = dbAdaptor;
 		mConManager = conManager;
+		this.context=context;
+		try
+        {
+     	   mDigest = java.security.MessageDigest.getInstance("MD5");
+        }
+        catch (NoSuchAlgorithmException nae)
+        {
+     	   Log.e(TAG, "Exception", nae);
+        }
 	}
 	
 	@Override
@@ -105,6 +88,8 @@ public class PhoneStateReceiver extends PhoneStateListener
 		//Log.i(TAG, "Call forwarding state" + cfi);
 		
 	}
+	String lastNumber = "unknown";
+	long lastRecordedCallTime = 0;
 	
 	@Override
 	public void onCallStateChanged(int state, String incomingNumber)
@@ -126,25 +111,113 @@ public class PhoneStateReceiver extends PhoneStateListener
 		JSONObject json = new JSONObject();
         
 
-        try
+        if (SystemSens.ADDL_SENSORS)
         {
-        	json.put("state", stateStr);
-            /*
-        	if (state == TelephonyManager.CALL_STATE_RINGING)
-        	{
-        		json.put("number", incomingNumber);
-        	}
-            */
-        }
-        catch (JSONException e)
-        {
-            Log.e(TAG, "Exception", e);
+            try
+            {
+                json.put("state", stateStr);
+                if (state == TelephonyManager.CALL_STATE_RINGING)
+                {
+                    json.put("number", hashNumber(incomingNumber));
+                    lastRecordedCallTime = System.currentTimeMillis();
+                    lastNumber = incomingNumber;
+                }
+                else if (state == TelephonyManager.CALL_STATE_OFFHOOK)
+                {
+                    json.put("number", 
+                            hashNumber(getLastCallLogEntry(context)));
+
+                }
+                else
+                {
+                	lastNumber = "unknown";
+                	lastRecordedCallTime = System.currentTimeMillis();
+                }
+            }
+            catch (JSONException e)
+            {
+                Log.e(TAG, "Exception", e);
+            }
         }
 		mDbAdaptor.createEntry(json, CALLSTATE);
-		
-		
-		//Log.i(TAG, "Call state changed to " + stateStr + " number: " + incomingNumber);
+		Log.i(TAG, json.toString());
 	}
+	
+//	BroadcastReceiver onOutgoingCall
+	
+	private String hashNumber(String number)
+	{
+		if (number == null || number.startsWith("-"))
+			return "unknown";
+//		else if (true) return number;
+		byte[] byteKey = mDigest.digest(number.getBytes());
+		return HashPrinter.hashString(byteKey);
+	}
+	
+	private String getLastCallLogEntry( Context context ) { 
+//		try
+//		{
+//			Thread.sleep(20000);
+//		}
+//		catch (InterruptedException e1)
+//		{
+//			// TODO Auto-generated catch block
+//			e1.printStackTrace();
+//		}
+        String[] projection = new String[] { 
+                BaseColumns._ID, 
+                CallLog.Calls.NUMBER, 
+                CallLog.Calls.TYPE,
+                CallLog.Calls.DATE
+              }; 
+              ContentResolver resolver = context.getContentResolver(); 
+              Cursor cur = resolver.query(  
+                            CallLog.Calls.CONTENT_URI, 
+                            projection,  
+                            null, 
+                            null, 
+                            CallLog.Calls.DEFAULT_SORT_ORDER ); 
+              int numberColumn = cur.getColumnIndex( CallLog.Calls.NUMBER );  
+              int typeColumn = cur.getColumnIndex( CallLog.Calls.TYPE ); 
+              int dateColumn = cur.getColumnIndex(CallLog.Calls.DATE);
+              if( !cur.moveToNext() ) { 
+                cur.close(); 
+                return ""; 
+              } 
+              
+              String number = cur.getString( numberColumn ); 
+              long date = cur.getLong(dateColumn);
+//              Log.e(TAG, "The date is " + (System.currentTimeMillis()-date)/1000 + " seconds old!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+              if (date < lastRecordedCallTime)
+            	  return lastNumber;
+              lastRecordedCallTime = date;
+              lastNumber = number;
+              String type = cur.getString( typeColumn ); 
+              String dir = null; 
+              try { 
+                int dircode = Integer.parseInt( type ); 
+                switch( dircode ) { 
+                  case CallLog.Calls.OUTGOING_TYPE: 
+                        dir = "OUTGOING";
+                        break; 
+ 
+                  case CallLog.Calls.INCOMING_TYPE: 
+                        dir = "INCOMING"; 
+                        break; 
+ 
+                  case CallLog.Calls.MISSED_TYPE: 
+                        dir = "MISSED"; 
+                        break; 
+                } 
+              } catch( NumberFormatException ex ) {} 
+              if( dir == null ) 
+                    dir = "Unknown, code: "+type; 
+              Log.i(TAG, "Ahoy! " + dir);
+
+              cur.close(); 
+              return number; 
+ 
+    }
 	
 	@Override
 	public void onCellLocationChanged(CellLocation location)
