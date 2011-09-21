@@ -69,7 +69,6 @@ import edu.ucla.cens.systemsens.sensors.EventLogger;
 import edu.ucla.cens.systemsens.sensors.NetLogger;
 import edu.ucla.cens.systemsens.sensors.CurrentReader;
 import edu.ucla.cens.systemsens.util.SystemSensDbAdaptor;
-import edu.ucla.cens.systemsens.util.PowerDbAdaptor;
 import edu.ucla.cens.systemsens.util.SystemSensWakeLock;
 import edu.ucla.cens.systemsens.util.Uploader;
 import edu.ucla.cens.systemsens.util.Status;
@@ -212,7 +211,6 @@ public class SystemSens extends Service
 
     /** Database adaptor object */
     private SystemSensDbAdaptor mDbAdaptor;
-    private PowerDbAdaptor  mPowerDB;
 
     /** Holds the IMEI of the device */
     public static String IMEI;
@@ -359,14 +357,12 @@ public class SystemSens extends Service
         mIsUploading = false;
 
         mDbAdaptor = new SystemSensDbAdaptor(this);
-        mPowerDB = new PowerDbAdaptor(this);
 
         mUploader = new Uploader(mDbAdaptor);
         //mDumper = new Dumper(mDbAdaptor, this);
 
 
         Log.i(TAG, "About to read PowerDB");
-        mPowerDB.readDeadline();
 
         
 
