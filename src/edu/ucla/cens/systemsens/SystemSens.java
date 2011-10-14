@@ -435,7 +435,7 @@ public class SystemSens extends Service
         		PhoneStateListener.LISTEN_DATA_CONNECTION_STATE |
         		PhoneStateListener.LISTEN_MESSAGE_WAITING_INDICATOR |
         		PhoneStateListener.LISTEN_SERVICE_STATE |
-        		PhoneStateListener.LISTEN_SIGNAL_STRENGTH);
+        		PhoneStateListener.LISTEN_SIGNAL_STRENGTHS);
 
         // Register for SMS messages
         mSmsReceiver = new SmsReceiver(mDbAdaptor);
